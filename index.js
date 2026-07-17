@@ -10,6 +10,8 @@ const responseRoutes = require('./routes/responses');
 const alertRoutes = require('./routes/alerts');
 const communityRoutes = require('./routes/community');
 const agencyRoutes = require('./routes/agencies');
+const authRoutes = require('./routes/auth');
+const adminRoutes = require('./routes/admin');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -31,6 +33,9 @@ app.use('/api', responseRoutes);
 app.use('/api', alertRoutes);
 app.use('/api/community', communityRoutes);
 app.use('/api', agencyRoutes);
+app.use('/api', authRoutes);
+app.use('/api', adminRoutes);
+
 
 app.use((req, res) => {
   res.status(404).json({

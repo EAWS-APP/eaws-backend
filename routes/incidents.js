@@ -1,6 +1,6 @@
 const express = require('express');
 const { supabaseAdmin } = require('../config/supabase');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireRole, requireAnyRole, attachProfile } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -25,43 +25,52 @@ router.post('/incidents/sos', requireAuth, async (req, res, next) => {
   try {
     const {
       emergency_type,
+      category,
       description,
       latitude,
       longitude,
       address,
+      location_name,
       metadata,
     } = req.body;
 
     const lat = Number(latitude);
     const lng = Number(longitude);
 
-    if (!emergency_type || !isValidCoordinate(lat, lng)) {
+    if (!isValidCoordinate(lat, lng)) {
       return res.status(400).json({
         success: false,
-        error: 'emergency_type, valid latitude, and valid longitude are required',
+        error: 'Valid latitude and valid longitude are required',
       });
     }
+
+    const resolvedType = category || emergency_type || 'SOS';
+    const resolvedLocationName = location_name || address || 'Unknown Location';
 
     const { data: duplicates, error: duplicateError } = await supabaseAdmin.rpc(
       'detect_duplicate_incidents',
       {
         new_lat: lat,
         new_lng: lng,
-        incident_type: emergency_type,
+        incident_type: resolvedType,
       }
     );
 
     if (duplicateError) throw duplicateError;
 
     const payload = {
-      emergency_type,
-      description: description || null,
+      emergency_type: resolvedType,
+      category: resolvedType,
+      title: req.body.title || 'Emergency SOS',
+      description: description || 'Citizen triggered emergency SOS broadcast.',
       latitude: lat,
       longitude: lng,
-      address: address || null,
+      address: resolvedLocationName,
+      location_name: resolvedLocationName,
       metadata: metadata || {},
       status: 'pending',
       reporter_id: req.authUser.id,
+      user_id: req.authUser.id,
     };
 
     const { data, error } = await supabaseAdmin
@@ -81,6 +90,7 @@ router.post('/incidents/sos', requireAuth, async (req, res, next) => {
     return next(error);
   }
 });
+
 
 router.get('/incidents/nearby', requireAuth, async (req, res, next) => {
   try {
@@ -108,25 +118,6 @@ router.get('/incidents/nearby', requireAuth, async (req, res, next) => {
     return res.json({
       success: true,
       incidents: data || [],
-    });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-router.get('/incidents/:id', requireAuth, async (req, res, next) => {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('incidents')
-      .select(INCIDENT_SELECT)
-      .eq('id', req.params.id)
-      .single();
-
-    if (error) throw error;
-
-    return res.json({
-      success: true,
-      incident: data,
     });
   } catch (error) {
     return next(error);
@@ -184,14 +175,21 @@ router.post('/incidents/:id/media', requireAuth, async (req, res, next) => {
 });
 
 // Get incident feed (with filters)
-router.get('/incidents/feed', requireAuth, async (req, res, next) => {
+router.get('/incidents/feed', requireAuth, attachProfile, async (req, res, next) => {
   try {
     const { category, severity, distanceKm, timeRange, sort } = req.query;
     
+    const role = req.userProfile ? req.userProfile.user_role : 'citizen';
+    const isOps = ['dispatcher', 'police', 'ambulance', 'fire', 'nadmo', 'admin', 'super_admin'].includes(role);
+
     let query = supabaseAdmin
       .from('incidents')
-      .select('*, incident_media(*)')
-      .eq('is_verified', true);
+      .select('*, incident_media(*)');
+
+    // Citizens only see verified posts, operators can see all (verified and unverified)
+    if (!isOps) {
+      query = query.eq('is_verified', true);
+    }
 
     if (category) {
       query = query.eq('category', category);
@@ -207,11 +205,42 @@ router.get('/incidents/feed', requireAuth, async (req, res, next) => {
       query = query.order('created_at', { ascending: false });
     }
 
-    const { data, error } = await query;
+    const { data: incidents, error } = await query;
 
     if (error) throw error;
 
-    return res.json({ success: true, incidents: data });
+    // Map media_url and media_type from incident_media relationship
+    let mappedIncidents = (incidents || []).map(incident => {
+      const firstMedia = incident.incident_media && incident.incident_media.length > 0 ? incident.incident_media[0] : null;
+      return {
+        ...incident,
+        media_url: firstMedia ? firstMedia.file_url : null,
+        media_type: firstMedia ? firstMedia.media_type : null
+      };
+    });
+
+    // Fetch profiles for the reporter_ids of these incidents
+    if (mappedIncidents.length > 0) {
+      const reporterIds = [...new Set(mappedIncidents.map(i => i.reporter_id).filter(Boolean))];
+      if (reporterIds.length > 0) {
+        const { data: profiles, error: profilesError } = await supabaseAdmin
+          .from('profiles')
+          .select('*')
+          .in('user_id', reporterIds);
+        
+        if (!profilesError && profiles) {
+          mappedIncidents = mappedIncidents.map(incident => {
+            const profile = profiles.find(p => p.user_id === incident.reporter_id);
+            return {
+              ...incident,
+              reporter_profile: profile || null
+            };
+          });
+        }
+      }
+    }
+
+    return res.json({ success: true, incidents: mappedIncidents });
   } catch (error) {
     return next(error);
   }
@@ -228,7 +257,16 @@ router.get('/incidents/my-reports', requireAuth, async (req, res, next) => {
 
     if (error) throw error;
 
-    return res.json({ success: true, incidents: data });
+    const mapped = (data || []).map(incident => {
+      const firstMedia = incident.incident_media && incident.incident_media.length > 0 ? incident.incident_media[0] : null;
+      return {
+        ...incident,
+        media_url: firstMedia ? firstMedia.file_url : null,
+        media_type: firstMedia ? firstMedia.media_type : null
+      };
+    });
+
+    return res.json({ success: true, incidents: mapped });
   } catch (error) {
     return next(error);
   }
@@ -260,28 +298,71 @@ router.patch('/incidents/:id', requireAuth, async (req, res, next) => {
 });
 
 // Get live incidents (all active/verified incidents)
-router.get('/incidents/live', requireAuth, async (req, res, next) => {
+router.get('/incidents/live', requireAuth, attachProfile, async (req, res, next) => {
+  try {
+    const role = req.userProfile ? req.userProfile.user_role : 'citizen';
+    const isOps = ['dispatcher', 'police', 'ambulance', 'fire', 'nadmo', 'admin', 'super_admin'].includes(role);
+
+    let query = supabaseAdmin
+      .from('incidents')
+      .select('*, incident_media(*)')
+      .neq('status', 'resolved');
+
+    if (!isOps) {
+      query = query.eq('is_verified', true);
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    const mapped = (data || []).map(incident => {
+      const firstMedia = incident.incident_media && incident.incident_media.length > 0 ? incident.incident_media[0] : null;
+      return {
+        ...incident,
+        media_url: firstMedia ? firstMedia.file_url : null,
+        media_type: firstMedia ? firstMedia.media_type : null
+      };
+    });
+
+    return res.json({ success: true, incidents: mapped });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// Get single incident by ID
+router.get('/incidents/:id', requireAuth, async (req, res, next) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('incidents')
-      .select('*, incident_media(*)')
-      .eq('is_verified', true)
-      .neq('status', 'resolved')
-      .order('created_at', { ascending: false });
+      .select(INCIDENT_SELECT)
+      .eq('id', req.params.id)
+      .single();
+
     if (error) throw error;
-    return res.json({ success: true, incidents: data });
+
+    return res.json({
+      success: true,
+      incident: data,
+    });
   } catch (error) {
     return next(error);
   }
 });
 
 // General incident creation endpoint
-router.post('/incidents', requireAuth, async (req, res, next) => {
+router.post('/incidents', requireAuth, attachProfile, async (req, res, next) => {
   try {
+    const role = req.userProfile ? req.userProfile.user_role : 'citizen';
+    const isOps = ['dispatcher', 'police', 'ambulance', 'fire', 'nadmo', 'admin', 'super_admin'].includes(role);
+
     const payload = {
       ...req.body,
       reporter_id: req.authUser.id,
-      status: 'pending',
+      user_id: req.authUser.id,
+      status: isOps ? 'active' : 'pending',
+      is_verified: isOps ? true : false,
     };
     const { data, error } = await supabaseAdmin
       .from('incidents')
@@ -296,7 +377,7 @@ router.post('/incidents', requireAuth, async (req, res, next) => {
 });
 
 // Triage an incident
-router.patch('/incidents/:id/triage', requireAuth, async (req, res, next) => {
+router.patch('/incidents/:id/triage', requireRole('dispatcher'), async (req, res, next) => {
   try {
     const { severity, status, notes } = req.body;
     const { data, error } = await supabaseAdmin
@@ -305,7 +386,18 @@ router.patch('/incidents/:id/triage', requireAuth, async (req, res, next) => {
       .eq('id', req.params.id)
       .select('*')
       .single();
+      
     if (error) throw error;
+
+    // Create Audit Log
+    await supabaseAdmin.from('audit_logs').insert({
+      actor_id: req.authUser.id,
+      action: 'triage_incident',
+      entity_type: 'incidents',
+      entity_id: req.params.id,
+      metadata: { severity, status, notes },
+    });
+
     return res.json({ success: true, incident: data });
   } catch (error) {
     return next(error);
@@ -313,27 +405,37 @@ router.patch('/incidents/:id/triage', requireAuth, async (req, res, next) => {
 });
 
 // Dispatch an agency to an incident
-router.post('/incidents/:id/dispatch', requireAuth, async (req, res, next) => {
+router.post('/incidents/:id/dispatch', requireRole('dispatcher'), async (req, res, next) => {
   try {
-    const { agency_type, unit_id, notes } = req.body;
+    const { agency_type, unit_id, notes, priority = 'medium' } = req.body;
     
     // Find agency ID
-    const { data: agencyData } = await supabaseAdmin
+    const { data: agencyData, error: agencyError } = await supabaseAdmin
       .from('agencies')
       .select('id')
-      .ilike('name', agency_type)
+      .eq('agency_type', agency_type.toLowerCase())
       .single();
+
+    if (agencyError || !agencyData) {
+      return res.status(404).json({
+        success: false,
+        error: `Agency of type ${agency_type} not found`,
+      });
+    }
 
     const payload = {
       incident_id: req.params.id,
-      agency_id: agencyData ? agencyData.id : null,
+      agency_id: agencyData.id,
+      agency_type: agency_type.toLowerCase(),
       unit_id: unit_id || null,
-      status: 'dispatched',
-      remarks: notes || null,
+      assigned_by: req.authUser.id,
+      status: 'assigned',
+      priority,
+      notes: notes || null,
     };
 
     const { data, error } = await supabaseAdmin
-      .from('responses')
+      .from('incident_assignments')
       .insert(payload)
       .select('*')
       .single();
@@ -343,11 +445,121 @@ router.post('/incidents/:id/dispatch', requireAuth, async (req, res, next) => {
     // Also update incident status
     await supabaseAdmin.from('incidents').update({ status: 'assigned' }).eq('id', req.params.id);
 
-    return res.status(201).json({ success: true, response: data });
+    // Create Audit Log
+    await supabaseAdmin.from('audit_logs').insert({
+      actor_id: req.authUser.id,
+      action: 'dispatch_agency',
+      entity_type: 'incidents',
+      entity_id: req.params.id,
+      metadata: { agency_type, unit_id, priority, assignment_id: data.id },
+    });
+
+    return res.status(201).json({
+      success: true,
+      response_id: data.id,
+      status: data.status,
+      assignment: data,
+    });
   } catch (error) {
     return next(error);
   }
 });
+
+// Update responder assignment status (e.g. accepted, en_route, arrived, resolved)
+router.patch('/incidents/assignments/:assignmentId/status', requireAuth, async (req, res, next) => {
+  try {
+    const { status } = req.body;
+    const validStatuses = ['assigned', 'accepted', 'en_route', 'arrived', 'transporting', 'resolved'];
+
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid status. Must be one of: ${validStatuses.join(', ')}`,
+      });
+    }
+
+    const { data: assignment, error: fetchError } = await supabaseAdmin
+      .from('incident_assignments')
+      .select('*')
+      .eq('id', req.params.assignmentId)
+      .single();
+
+    if (fetchError || !assignment) {
+      return res.status(404).json({
+        success: false,
+        error: 'Assignment not found',
+      });
+    }
+
+    // Update assignment status
+    const { data, error } = await supabaseAdmin
+      .from('incident_assignments')
+      .update({ status })
+      .eq('id', req.params.assignmentId)
+      .select('*')
+      .single();
+
+    if (error) throw error;
+
+    // Update parent incident status
+    if (status === 'resolved') {
+      await supabaseAdmin
+        .from('incidents')
+        .update({ status: 'resolved' })
+        .eq('id', assignment.incident_id);
+    } else {
+      await supabaseAdmin
+        .from('incidents')
+        .update({ status: 'active' })
+        .eq('id', assignment.incident_id);
+    }
+
+    // Create Audit Log
+    await supabaseAdmin.from('audit_logs').insert({
+      actor_id: req.authUser.id,
+      action: 'update_assignment_status',
+      entity_type: 'incident_assignments',
+      entity_id: req.params.assignmentId,
+      metadata: { status },
+    });
+
+    return res.json({ success: true, assignment: data });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// Request tactical backup/escalate incident
+router.post('/incidents/:id/escalate', requireAuth, async (req, res, next) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('incidents')
+      .update({
+        status: 'escalated',
+        severity: 'CRITICAL',
+        is_verified: true
+      })
+      .eq('id', req.params.id)
+      .select('*')
+      .single();
+
+    if (error) throw error;
+
+    // Create Audit Log
+    await supabaseAdmin.from('audit_logs').insert({
+      actor_id: req.authUser.id,
+      action: 'escalate_incident',
+      entity_type: 'incidents',
+      entity_id: req.params.id,
+      metadata: { reason: req.body.reason || 'Tactical backup requested' },
+    });
+
+    return res.json({ success: true, incident: data });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 
 // Delete an incident
 router.delete('/incidents/:id', requireAuth, async (req, res, next) => {

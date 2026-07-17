@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "test": "node --check index.js && node --check config/supabase.js && node --check middleware/auth.js && node --check routes/auth.js && node --check routes/incidents.js && node --check routes/responses.js && node --check routes/alerts.js"
+    "test": "node --check index.js && node --check config/supabase.js && node --check middleware/auth.js && node --check routes/auth.js && node --check routes/incidents.js && node --check routes/responses.js && node --check routes/alerts.js && node --check routes/admin.js"
   },
   "keywords": [],
   "author": "",

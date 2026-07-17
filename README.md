@@ -39,3 +39,13 @@ For every request made to this Express API, you must attach the Supabase user's 
 
 ## Database Note
 The backend relies heavily on Supabase PostGIS for distance calculations. Make sure `database_setup.sql` has been executed in the Supabase SQL editor to enable these features.
+
+## Phase 3 Role-Based Integration
+
+The current dashboard/mobile integration roadmap is documented in:
+
+`docs/role-based-integration-roadmap.md`
+
+Run this SQL in Supabase before implementing role-based routing and agency dashboards:
+
+`sql/phase3_roles_dispatch_schema.sql`
