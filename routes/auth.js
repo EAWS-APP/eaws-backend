@@ -310,5 +310,71 @@ router.post('/auth/verify-email', async (req, res, next) => {
   }
 });
 
+// Block user
+router.post('/admin/users/:userId/block', requireAuth, async (req, res, next) => {
+  try {
+    const role = req.authUser.user_metadata?.role || 'citizen';
+    const isOperator = ['dispatcher', 'police', 'fire', 'ambulance', 'admin'].includes(role);
+    if (!isOperator) {
+      return res.status(403).json({ success: false, error: 'Unauthorized to block users' });
+    }
+
+    const { userId } = req.params;
+    const { mockProfiles } = require('./mockDb');
+
+    // In-memory mock fallback
+    if (req.isOfflineMock) {
+      if (mockProfiles[userId]) {
+        mockProfiles[userId].is_active = false;
+      }
+      return res.json({ success: true, message: 'User blocked' });
+    }
+
+    // Supabase
+    const { error } = await supabaseAdmin
+      .from('profiles')
+      .update({ is_active: false })
+      .eq('user_id', userId);
+
+    if (error) throw error;
+    return res.json({ success: true, message: 'User blocked' });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// Unblock user
+router.post('/admin/users/:userId/unblock', requireAuth, async (req, res, next) => {
+  try {
+    const role = req.authUser.user_metadata?.role || 'citizen';
+    const isOperator = ['dispatcher', 'police', 'fire', 'ambulance', 'admin'].includes(role);
+    if (!isOperator) {
+      return res.status(403).json({ success: false, error: 'Unauthorized to unblock users' });
+    }
+
+    const { userId } = req.params;
+    const { mockProfiles } = require('./mockDb');
+
+    // In-memory mock fallback
+    if (req.isOfflineMock) {
+      if (mockProfiles[userId]) {
+        mockProfiles[userId].is_active = true;
+      }
+      return res.json({ success: true, message: 'User unblocked' });
+    }
+
+    // Supabase
+    const { error } = await supabaseAdmin
+      .from('profiles')
+      .update({ is_active: true })
+      .eq('user_id', userId);
+
+    if (error) throw error;
+    return res.json({ success: true, message: 'User unblocked' });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 module.exports = router;
 

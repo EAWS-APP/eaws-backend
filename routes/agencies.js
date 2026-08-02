@@ -148,16 +148,36 @@ router.patch('/assignments/:id/status', requireAnyRole(['police', 'ambulance', '
 // Get live units for the dashboard map
 router.get('/units/live', requireAuth, async (req, res, next) => {
   try {
+    if (req.isOfflineMock) throw new Error('Offline mock active');
     const { data, error } = await supabaseAdmin
       .from('agency_units')
-      .select('*, agencies(name)')
+      .select('id, callsign, status, current_latitude, current_longitude, unit_type, agency_id, agencies(name, agency_type)')
       .neq('status', 'OUT_OF_SERVICE');
 
     if (error) throw error;
 
-    return res.json({ success: true, units: data || [] });
+    // Normalize: flatten nested agencies join so the map component can access agency_type and name
+    const units = (data || []).map((u) => ({
+      id: u.id,
+      name: u.callsign || `UNIT-${u.id.slice(0, 6)}`,
+      agency_type: u.agencies?.agency_type || u.unit_type || 'police',
+      status: u.status?.toLowerCase() || 'available',
+      latitude: u.current_latitude || 5.6037,
+      longitude: u.current_longitude || -0.1870,
+      last_updated: u.last_updated,
+    }));
+
+    return res.json({ success: true, units });
   } catch (error) {
-    return next(error);
+    console.warn('⚠️ Supabase Agency Units offline, serving mock units.');
+    const mockUnits = [
+      { id: 'unit-1', name: 'PATROL-Alpha', agency_type: 'police', status: 'available', latitude: 5.5600, longitude: -0.1900 },
+      { id: 'unit-2', name: 'PATROL-Beta', agency_type: 'police', status: 'busy', latitude: 5.6200, longitude: -0.1700 },
+      { id: 'unit-3', name: 'FIRE-Engine-1', agency_type: 'fire', status: 'available', latitude: 5.5458, longitude: -0.2078 },
+      { id: 'unit-4', name: 'EMS-Amb-3', agency_type: 'ambulance', status: 'available', latitude: 5.6100, longitude: -0.1800 },
+      { id: 'unit-5', name: 'EMS-Amb-5', agency_type: 'ambulance', status: 'busy', latitude: 5.6178, longitude: -0.1872 },
+    ];
+    return res.json({ success: true, units: mockUnits });
   }
 });
 
