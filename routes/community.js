@@ -1,47 +1,10 @@
 const express = require('express');
 const { supabaseAdmin } = require('../config/supabase');
 const { requireAuth } = require('../middleware/auth');
-const { mockComments, mockReactions } = require('./mockDb');
+const { mockComments, mockReactions, mockCommunityPosts } = require('./mockDb');
 
 const router = express.Router();
 
-// Get comments for an incident (with commenter profiles)
-router.get('/incidents/:id/comments', requireAuth, async (req, res, next) => {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('incident_comments')
-      .select('*')
-      .eq('incident_id', req.params.id)
-      .order('created_at', { ascending: true });
-    
-    if (error) throw error;
-    
-    let mergedComments = data || [];
-    if (mergedComments.length > 0) {
-      const userIds = [...new Set(mergedComments.map(c => c.user_id).filter(Boolean))];
-      if (userIds.length > 0) {
-        const { data: profiles, error: profilesError } = await supabaseAdmin
-          .from('profiles')
-          .select('*')
-          .in('user_id', userIds);
-        
-        if (!profilesError && profiles) {
-          mergedComments = mergedComments.map(comment => {
-            const profile = profiles.find(p => p.user_id === comment.user_id);
-            return {
-              ...comment,
-              user_profile: profile || null
-            };
-          });
-        }
-      }
-    }
-    
-    return res.json({ success: true, comments: mergedComments });
-  } catch (error) {
-    return next(error);
-  }
-});
 
 // Add a comment to an incident
 router.post('/incidents/:id/comments', requireAuth, async (req, res, next) => {
@@ -101,8 +64,12 @@ router.post('/incidents/:id/comments', requireAuth, async (req, res, next) => {
   }
 });
 
-// Get comments for an incident
+// Get comments for an incident (with offline mock fallback)
 router.get('/incidents/:id/comments', requireAuth, async (req, res, next) => {
+  // Fast-path: mock/offline mode
+  if (req.isOfflineMock) {
+    return res.json({ success: true, comments: mockComments[req.params.id] || [] });
+  }
   try {
     const { data, error } = await supabaseAdmin
       .from('incident_comments')
@@ -113,7 +80,7 @@ router.get('/incidents/:id/comments', requireAuth, async (req, res, next) => {
     if (error) throw error;
     return res.json({ success: true, comments: data || [] });
   } catch (error) {
-    console.warn('⚠️ Supabase Incident Comments GET failed (offline), returning mock comments');
+    console.warn('\u26a0\ufe0f Supabase Incident Comments GET failed (offline), returning mock comments');
     return res.json({ success: true, comments: mockComments[req.params.id] || [] });
   }
 });
@@ -165,6 +132,97 @@ router.post('/incidents/:id/reactions', requireAuth, async (req, res, next) => {
       success: true,
       reaction: newReaction
     });
+  }
+});
+
+// ─── Community Posts (free-form messages, not formal incidents) ───────────────
+
+// GET all community posts, newest-first
+router.get('/posts', requireAuth, async (req, res) => {
+  try {
+    if (req.isOfflineMock) throw new Error('offline');
+    const { data, error } = await supabaseAdmin
+      .from('community_posts')
+      .select('*, replies:community_post_replies(*)')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return res.json({ success: true, posts: data || [] });
+  } catch {
+    return res.json({
+      success: true,
+      posts: [...mockCommunityPosts].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    });
+  }
+});
+
+// POST — create a new free-form community message
+router.post('/posts', requireAuth, async (req, res) => {
+  const { content, image_url } = req.body;
+  if (!content || !content.trim()) {
+    return res.status(400).json({ success: false, error: 'Post content is required.' });
+  }
+  try {
+    if (req.isOfflineMock) throw new Error('offline');
+    const { data, error } = await supabaseAdmin
+      .from('community_posts')
+      .insert({ content: content.trim(), image_url: image_url || null, author_id: req.authUser.id })
+      .select('*').single();
+    if (error) throw error;
+    return res.status(201).json({ success: true, post: data });
+  } catch {
+    const meta = req.authUser.user_metadata || {};
+    const name = meta.full_name || 'Ghana Citizen';
+    const newPost = {
+      id: 'cp-' + Math.floor(Math.random() * 90000 + 10000),
+      post_type: 'community',
+      content: content.trim(),
+      image_url: image_url || null,
+      author_id: req.authUser.id,
+      author_name: name,
+      author_initials: name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2),
+      is_verified: true,
+      created_at: new Date().toISOString(),
+      replies_count: 0,
+      likes_count: 0,
+      replies: [],
+    };
+    mockCommunityPosts.unshift(newPost);
+    return res.status(201).json({ success: true, post: newPost });
+  }
+});
+
+// POST — reply to a community post
+router.post('/posts/:id/replies', requireAuth, async (req, res) => {
+  const { content } = req.body;
+  if (!content || !content.trim()) {
+    return res.status(400).json({ success: false, error: 'Reply content is required.' });
+  }
+  try {
+    if (req.isOfflineMock) throw new Error('offline');
+    const { data, error } = await supabaseAdmin
+      .from('community_post_replies')
+      .insert({ post_id: req.params.id, author_id: req.authUser.id, content: content.trim() })
+      .select('*').single();
+    if (error) throw error;
+    return res.status(201).json({ success: true, reply: data });
+  } catch {
+    const meta = req.authUser.user_metadata || {};
+    const name = meta.full_name || 'Ghana Citizen';
+    const reply = {
+      id: 'cpr-' + Math.floor(Math.random() * 90000 + 10000),
+      post_id: req.params.id,
+      author_name: name,
+      author_initials: name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2),
+      content: content.trim(),
+      created_at: new Date().toISOString(),
+    };
+    const post = mockCommunityPosts.find(p => p.id === req.params.id);
+    if (post) {
+      post.replies = post.replies || [];
+      post.replies.push(reply);
+      post.replies_count = post.replies.length;
+    }
+    return res.status(201).json({ success: true, reply });
   }
 });
 

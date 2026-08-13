@@ -14,10 +14,10 @@ async function requireAuth(req, res, next) {
   // Check for mock token fallback
   if (token.startsWith('mock-token-')) {
     const email = token.slice(11);
-    let role = 'dispatcher';
-    let code = 'DISP-0001';
+    let role = 'citizen';
+    let code = 'GH-ACR-5501-21';
     let agency = null;
-    let name = 'Central Dispatcher';
+    let name = 'Ghana Citizen';
 
     if (email.startsWith('police')) {
       role = 'police';
@@ -38,6 +38,10 @@ async function requireAuth(req, res, next) {
       role = 'admin';
       code = 'ADMIN-001';
       name = 'System Admin';
+    } else if (email.startsWith('dispatcher')) {
+      role = 'dispatcher';
+      code = 'DISP-0001';
+      name = 'Central Dispatcher';
     }
 
     req.isOfflineMock = true;
@@ -68,16 +72,17 @@ async function requireAuth(req, res, next) {
     return next();
   } catch (err) {
     console.warn('⚠️ Supabase Auth offline. Attempting to parse token as fallback.');
-    let email = 'dispatcher@eaws.gov.gh';
+    let email = 'citizen@eaws.gov.gh';
     if (token.includes('police')) email = 'police@eaws.gov.gh';
     else if (token.includes('fire')) email = 'fire@eaws.gov.gh';
     else if (token.includes('ambulance')) email = 'ambulance@eaws.gov.gh';
     else if (token.includes('admin')) email = 'admin@eaws.gov.gh';
+    else if (token.includes('dispatcher')) email = 'dispatcher@eaws.gov.gh';
 
-    let role = 'dispatcher';
-    let code = 'DISP-0001';
+    let role = 'citizen';
+    let code = 'GH-ACR-5501-21';
     let agency = null;
-    let name = 'Central Dispatcher';
+    let name = 'Ghana Citizen';
 
     if (email.startsWith('police')) {
       role = 'police';
@@ -98,6 +103,10 @@ async function requireAuth(req, res, next) {
       role = 'admin';
       code = 'ADMIN-001';
       name = 'System Admin';
+    } else if (email.startsWith('dispatcher')) {
+      role = 'dispatcher';
+      code = 'DISP-0001';
+      name = 'Central Dispatcher';
     }
 
     req.isOfflineMock = true;
@@ -121,6 +130,21 @@ async function attachProfile(req, res, next) {
       success: false,
       error: 'Authentication required before attaching profile',
     });
+  }
+
+  // Fast-path: mock/offline session — build profile from auth metadata, no DB call
+  if (req.isOfflineMock) {
+    const meta = req.authUser.user_metadata || {};
+    req.userProfile = {
+      user_id:       req.authUser.id,
+      user_role:     meta.role || 'citizen',
+      operator_code: meta.operator_code || null,
+      agency_type:   meta.agency_type || null,
+      is_approved:   true,
+      is_active:     true,
+      full_name:     meta.full_name || null,
+    };
+    return next();
   }
 
   try {
@@ -151,7 +175,19 @@ async function attachProfile(req, res, next) {
 
     return next();
   } catch (error) {
-    return next(error);
+    // Supabase offline — synthesize a minimal profile from token metadata
+    console.warn('\u26a0\ufe0f Supabase offline in attachProfile, using metadata fallback.');
+    const meta = req.authUser.user_metadata || {};
+    req.userProfile = {
+      user_id:       req.authUser.id,
+      user_role:     meta.role || 'citizen',
+      operator_code: meta.operator_code || null,
+      agency_type:   meta.agency_type || null,
+      is_approved:   true,
+      is_active:     true,
+      full_name:     meta.full_name || null,
+    };
+    return next();
   }
 }
 

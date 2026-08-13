@@ -12,12 +12,12 @@ const responseRoutes = require('./routes/responses');
 const alertRoutes = require('./routes/alerts');
 const communityRoutes = require('./routes/community');
 const agencyRoutes = require('./routes/agencies');
-const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
 
 const app = express();
 // PORT must match NEXT_PUBLIC_API_BASE_URL in the dashboard (.env.local)
-const PORT = process.env.PORT || 5000;
+// PORT must match NEXT_PUBLIC_API_BASE_URL (dashboard) and EawsApiClient.baseUrl (mobile)
+const PORT = process.env.PORT || 5001;
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -39,7 +39,6 @@ app.use('/api', responseRoutes);
 app.use('/api', alertRoutes);
 app.use('/api/community', communityRoutes);
 app.use('/api', agencyRoutes);
-app.use('/api', authRoutes);
 app.use('/api', adminRoutes);
 
 

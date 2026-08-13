@@ -1,10 +1,14 @@
 // In-memory mock database for EAWS sync when offline or in fallback mode
 const mockProfiles = {
+  // Registered citizens
   "c-001": { user_id: "c-001", full_name: "D. Harrison", phone: "+233 54 882 9912", user_role: "citizen", operator_code: "GH-ACR-8829-44", is_approved: true },
   "c-002": { user_id: "c-002", full_name: "Ama Serwaa Boateng", phone: "+233 20 111 2233", user_role: "citizen", operator_code: "GH-ACR-7723-09", is_approved: true },
   "c-003": { user_id: "c-003", full_name: "Kwame Asante", phone: "+233 24 555 7788", user_role: "citizen", operator_code: "GH-ACR-5501-21", is_approved: true },
   "c-004": { user_id: "c-004", full_name: "Nana Mensah", phone: "+233 50 909 1010", user_role: "citizen", operator_code: "GH-ACR-3312-17", is_approved: false },
-  "c-005": { user_id: "c-005", full_name: "Abena Osei-Bonsu", phone: "+233 27 456 8801", user_role: "citizen", operator_code: "GH-ACR-1189-44", is_approved: true }
+  "c-005": { user_id: "c-005", full_name: "Abena Osei-Bonsu", phone: "+233 27 456 8801", user_role: "citizen", operator_code: "GH-ACR-1189-44", is_approved: true },
+  // Mock auth token identities (offline / simulator mode)
+  "mock-id-citizen": { user_id: "mock-id-citizen", full_name: "Ghana Citizen", phone: "+233 20 000 0001", user_role: "citizen", operator_code: "GH-ACR-0000-01", is_approved: true },
+  "mock-id-dispatcher": { user_id: "mock-id-dispatcher", full_name: "EAWS Dispatcher", phone: "+233 30 000 0001", user_role: "dispatcher", operator_code: "DISP-0001", is_approved: true }
 };
 
 const mockIncidents = [
@@ -197,9 +201,45 @@ const mockComments = {
 
 const mockReactions = {};
 
+// ── In-memory community posts (free-form messages, not formal incidents) ────────
+const mockCommunityPosts = [
+  {
+    id: 'cp-001',
+    post_type: 'community',
+    content: 'Anyone else notice the traffic is really bad on the N1 highway this morning? Took me 45 minutes from Spintex to Accra Mall. Stay safe out there everyone 🙏',
+    author_id: 'c-001',
+    author_name: 'D. Harrison',
+    author_initials: 'DH',
+    is_verified: true,
+    created_at: new Date(Date.now() - 1000 * 60 * 8).toISOString(),
+    replies_count: 2,
+    likes_count: 7,
+    replies: [
+      { id: 'cpr-001', post_id: 'cp-001', author_name: 'Ama Serwaa Boateng', author_initials: 'AS', content: 'Yes! Same here. I heard there was an accident near Tetteh Quarshie. Take the Legon route.', created_at: new Date(Date.now() - 1000 * 60 * 5).toISOString() },
+      { id: 'cpr-002', post_id: 'cp-001', author_name: 'Ghana Citizen', author_initials: 'GC', content: 'Thanks for the heads up! Switching routes now.', created_at: new Date(Date.now() - 1000 * 60 * 3).toISOString() }
+    ]
+  },
+  {
+    id: 'cp-002',
+    post_type: 'community',
+    content: 'Heads up: The Electricity Company is doing maintenance work in East Legon areas 12 and 13 today from 9am to 4pm. Power will be out. Charge your devices now! ⚡',
+    author_id: 'c-003',
+    author_name: 'Kwame Asante',
+    author_initials: 'KA',
+    is_verified: true,
+    created_at: new Date(Date.now() - 1000 * 60 * 35).toISOString(),
+    replies_count: 1,
+    likes_count: 21,
+    replies: [
+      { id: 'cpr-003', post_id: 'cp-002', author_name: 'Nana Mensah', author_initials: 'NM', content: 'Thank you! Good to know. Will buy ice for the fridge 😅', created_at: new Date(Date.now() - 1000 * 60 * 20).toISOString() }
+    ]
+  }
+];
+
 module.exports = {
   mockProfiles,
   mockIncidents,
   mockComments,
-  mockReactions
+  mockReactions,
+  mockCommunityPosts
 };

@@ -245,10 +245,42 @@ router.get('/incidents/feed', requireAuth, attachProfile, async (req, res, next)
   } catch (error) {
     console.warn('⚠️ Supabase Incidents Feed offline, serving mock incidents.');
     const { mockProfiles } = require('./mockDb');
-    const activeIncidents = mockIncidents.filter(inc => {
-      const reporter = mockProfiles[inc.reporter_id];
-      return !reporter || reporter.is_active !== false;
-    });
+
+    // Category → representative Unsplash image mapping for consistent cross-platform display
+    const MOCK_MEDIA = {
+      fire:      'https://images.unsplash.com/photo-1508873699372-7aeab60b44ab?auto=format&fit=crop&q=80&w=800',
+      flood:     'https://images.unsplash.com/photo-1547683905-f686c993aae5?auto=format&fit=crop&q=80&w=800',
+      medical:   'https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?auto=format&fit=crop&q=80&w=800',
+      police:    'https://images.unsplash.com/photo-1603466182843-75a82bb0ab71?auto=format&fit=crop&q=80&w=800',
+      suspicious:'https://images.unsplash.com/photo-1518791841217-8f162f1912da?auto=format&fit=crop&q=80&w=800',
+    };
+
+    const activeIncidents = mockIncidents
+      .filter(inc => {
+        const reporter = mockProfiles[inc.reporter_id];
+        return !reporter || reporter.is_active !== false;
+      })
+      .map(inc => {
+        const profile = mockProfiles[inc.reporter_id] || null;
+        const imgUrl = MOCK_MEDIA[inc.category] || null;
+        return {
+          ...inc,
+          // Normalize to the same shape the Supabase path returns
+          media_url:  imgUrl,
+          media_type: imgUrl ? 'image' : null,
+          incident_media: imgUrl
+            ? [{ file_url: imgUrl, media_type: 'image' }]
+            : [],
+          reporter_profile: profile
+            ? {
+                full_name:     profile.full_name,
+                user_role:     profile.user_role,
+                operator_code: profile.operator_code,
+              }
+            : null,
+        };
+      });
+
     return res.json({ success: true, incidents: activeIncidents });
   }
 });
