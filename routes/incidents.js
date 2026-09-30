@@ -3,7 +3,7 @@ const { supabaseAdmin } = require('../config/supabase');
 
 
 const { requireAuth, requireRole, requireAnyRole, attachProfile } = require('../middleware/auth');
-const { mockIncidents } = require('./mockDb');
+const { mockIncidents, mockProfiles, resolveAuthorName, saveIncidents } = require('./mockDb');
 
 const router = express.Router();
 
@@ -446,10 +446,12 @@ router.post('/incidents', requireAuth, attachProfile, async (req, res, next) => 
     if (req.isOfflineMock) throw new Error('Offline mock active');
     const role = req.userProfile ? req.userProfile.user_role : 'citizen';
     const isOps = ['dispatcher', 'police', 'ambulance', 'fire', 'nadmo', 'admin', 'super_admin'].includes(role);
+    const authorName = resolveAuthorName(req.authUser);
     const payload = {
       ...req.body,
       reporter_id: req.authUser.id,
       user_id: req.authUser.id,
+      user_name: req.body.is_anonymous ? null : authorName,
       status: isOps ? 'active' : 'pending',
       is_verified: isOps ? true : false,
     };
@@ -461,6 +463,7 @@ router.post('/incidents', requireAuth, attachProfile, async (req, res, next) => 
     if (error) throw error;
     return res.status(201).json({ success: true, incident: data });
   } catch (error) {
+    const authorName = resolveAuthorName(req.authUser);
     const newInc = {
       id: 'inc-' + Math.floor(Math.random() * 10000),
       status: 'pending',
@@ -471,15 +474,23 @@ router.post('/incidents', requireAuth, attachProfile, async (req, res, next) => 
       views_count: 0,
       reporter_id: req.authUser.id,
       user_id: req.authUser.id,
-      user_name: req.authUser.user_metadata?.full_name || 'Ghana Citizen',
+      user_name: req.body.is_anonymous ? null : authorName,
       reporter_profile: {
-        full_name: req.authUser.user_metadata?.full_name || 'Ghana Citizen',
+        full_name: req.body.is_anonymous ? null : authorName,
         user_role: req.authUser.user_metadata?.role || 'citizen',
         operator_code: req.authUser.user_metadata?.operator_code || null
       },
       ...req.body,
     };
+    // Keep user_name and reporter_profile consistent even after spread of req.body
+    newInc.user_name = req.body.is_anonymous ? null : authorName;
+    newInc.reporter_profile = {
+      full_name: req.body.is_anonymous ? null : authorName,
+      user_role: req.authUser.user_metadata?.role || 'citizen',
+      operator_code: req.authUser.user_metadata?.operator_code || null
+    };
     mockIncidents.unshift(newInc);
+    if (typeof saveIncidents === 'function') saveIncidents();
     return res.status(201).json({
       success: true,
       incident: newInc

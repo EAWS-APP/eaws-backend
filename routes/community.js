@@ -1,7 +1,7 @@
 const express = require('express');
 const { supabaseAdmin } = require('../config/supabase');
 const { requireAuth } = require('../middleware/auth');
-const { mockComments, mockReactions, mockCommunityPosts } = require('./mockDb');
+const { mockComments, mockReactions, mockCommunityPosts, saveCommunityPosts, saveComments, resolveAuthorName } = require('./mockDb');
 
 const router = express.Router();
 
@@ -40,7 +40,7 @@ router.post('/incidents/:id/comments', requireAuth, async (req, res, next) => {
       content: req.body.content,
       created_at: new Date().toISOString(),
       user_profile: {
-        full_name: req.authUser.user_metadata?.full_name || 'Ghana Citizen',
+        full_name: req.authUser.user_metadata?.full_name || resolveAuthorName(req.authUser) || 'Citizen Reporter',
         user_role: req.authUser.user_metadata?.role || 'citizen',
         operator_code: req.authUser.user_metadata?.operator_code || null
       }
@@ -121,11 +121,18 @@ router.post('/incidents/:id/reactions', requireAuth, async (req, res, next) => {
       created_at: new Date().toISOString()
     };
     
-    // Increment likes_count on mock incident
-    const { mockIncidents } = require('./mockDb');
+    const { mockIncidents, mockCommunityPosts, saveIncidents, saveCommunityPosts } = require('./mockDb');
     const inc = mockIncidents.find(i => i.id === req.params.id);
     if (inc) {
-      inc.likes_count = (inc.likes_count || 0) + 1;
+      if (req.body.reaction_type === 'alarmed') inc.alarmed_count = (inc.alarmed_count || 0) + 1;
+      else if (req.body.reaction_type === 'concerned') inc.concerned_count = (inc.concerned_count || 0) + 1;
+      else inc.likes_count = (inc.likes_count || 0) + 1;
+      if (typeof saveIncidents === 'function') saveIncidents();
+    }
+    const cp = mockCommunityPosts.find(p => p.id === req.params.id);
+    if (cp) {
+      cp.likes_count = (cp.likes_count || 0) + 1;
+      if (typeof saveCommunityPosts === 'function') saveCommunityPosts();
     }
 
     return res.status(201).json({
@@ -170,8 +177,7 @@ router.post('/posts', requireAuth, async (req, res) => {
     if (error) throw error;
     return res.status(201).json({ success: true, post: data });
   } catch {
-    const meta = req.authUser.user_metadata || {};
-    const name = meta.full_name || 'Ghana Citizen';
+    const name = resolveAuthorName(req.authUser);
     const newPost = {
       id: 'cp-' + Math.floor(Math.random() * 90000 + 10000),
       post_type: 'community',
@@ -187,6 +193,7 @@ router.post('/posts', requireAuth, async (req, res) => {
       replies: [],
     };
     mockCommunityPosts.unshift(newPost);
+    if (typeof saveCommunityPosts === 'function') saveCommunityPosts();
     return res.status(201).json({ success: true, post: newPost });
   }
 });
@@ -206,8 +213,7 @@ router.post('/posts/:id/replies', requireAuth, async (req, res) => {
     if (error) throw error;
     return res.status(201).json({ success: true, reply: data });
   } catch {
-    const meta = req.authUser.user_metadata || {};
-    const name = meta.full_name || 'Ghana Citizen';
+    const name = resolveAuthorName(req.authUser);
     const reply = {
       id: 'cpr-' + Math.floor(Math.random() * 90000 + 10000),
       post_id: req.params.id,
@@ -221,6 +227,7 @@ router.post('/posts/:id/replies', requireAuth, async (req, res) => {
       post.replies = post.replies || [];
       post.replies.push(reply);
       post.replies_count = post.replies.length;
+      if (typeof saveCommunityPosts === 'function') saveCommunityPosts();
     }
     return res.status(201).json({ success: true, reply });
   }

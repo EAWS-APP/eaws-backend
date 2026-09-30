@@ -1,4 +1,5 @@
 const { supabaseAdmin } = require('../config/supabase');
+const { resolveAuthorName, mockProfiles, mockProfilesByEmail } = require('../routes/mockDb');
 
 async function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization || '';
@@ -17,41 +18,28 @@ async function requireAuth(req, res, next) {
     let role = 'citizen';
     let code = 'GH-ACR-5501-21';
     let agency = null;
-    let name = 'Ghana Citizen';
 
-    if (email.startsWith('police')) {
-      role = 'police';
-      code = 'POL-0021';
-      agency = 'police';
-      name = 'Police Operator';
-    } else if (email.startsWith('fire')) {
-      role = 'fire';
-      code = 'GNFS-0012';
-      agency = 'fire';
-      name = 'Fire Operator';
-    } else if (email.startsWith('ambulance')) {
-      role = 'ambulance';
-      code = 'AMB-0003';
-      agency = 'ambulance';
-      name = 'EMS Operator';
-    } else if (email.startsWith('admin')) {
-      role = 'admin';
-      code = 'ADMIN-001';
-      name = 'System Admin';
-    } else if (email.startsWith('dispatcher')) {
-      role = 'dispatcher';
-      code = 'DISP-0001';
-      name = 'Central Dispatcher';
-    }
+    if (email.startsWith('police')) { role = 'police'; code = 'POL-0021'; agency = 'police'; }
+    else if (email.startsWith('fire')) { role = 'fire'; code = 'GNFS-0012'; agency = 'fire'; }
+    else if (email.startsWith('ambulance')) { role = 'ambulance'; code = 'AMB-0003'; agency = 'ambulance'; }
+    else if (email.startsWith('admin')) { role = 'admin'; code = 'ADMIN-001'; }
+    else if (email.startsWith('dispatcher')) { role = 'dispatcher'; code = 'DISP-0001'; }
+
+    // Look up the user by email in the registry for full profile resolution
+    const registryProfile = mockProfilesByEmail[email.toLowerCase()] || mockProfiles[`mock-id-${role}`];
+    const userId = registryProfile ? registryProfile.user_id : `mock-id-${role}`;
+    const name = (registryProfile && registryProfile.full_name) || resolveAuthorName({ id: userId, email, user_metadata: {} });
+    const resolvedCode = (registryProfile && registryProfile.operator_code) || code;
+    const resolvedRole = (registryProfile && registryProfile.user_role) || role;
 
     req.isOfflineMock = true;
     req.authUser = {
-      id: `mock-id-${role}`,
+      id: userId,
       email,
       user_metadata: {
         full_name: name,
-        role,
-        operator_code: code,
+        role: resolvedRole,
+        operator_code: resolvedCode,
         agency_type: agency
       }
     };
@@ -62,16 +50,20 @@ async function requireAuth(req, res, next) {
     const { data, error } = await supabaseAdmin.auth.getUser(token);
 
     if (error || !data.user) {
-      return res.status(401).json({
-        success: false,
-        error: 'Invalid or expired token',
-      });
+      throw error || new Error('Invalid Supabase token');
+    }
+
+    // Enrich user with resolved name from registry
+    const resolvedName = resolveAuthorName(data.user);
+    if (!data.user.user_metadata) data.user.user_metadata = {};
+    if (!data.user.user_metadata.full_name || data.user.user_metadata.full_name === 'Ghana Citizen') {
+      data.user.user_metadata.full_name = resolvedName;
     }
 
     req.authUser = data.user;
     return next();
   } catch (err) {
-    console.warn('⚠️ Supabase Auth offline. Attempting to parse token as fallback.');
+    console.warn('⚠️ Supabase Auth offline. Resolving identity from registry.');
     let email = 'citizen@eaws.gov.gh';
     if (token.includes('police')) email = 'police@eaws.gov.gh';
     else if (token.includes('fire')) email = 'fire@eaws.gov.gh';
@@ -82,43 +74,22 @@ async function requireAuth(req, res, next) {
     let role = 'citizen';
     let code = 'GH-ACR-5501-21';
     let agency = null;
-    let name = 'Ghana Citizen';
 
-    if (email.startsWith('police')) {
-      role = 'police';
-      code = 'POL-0021';
-      agency = 'police';
-      name = 'Police Operator';
-    } else if (email.startsWith('fire')) {
-      role = 'fire';
-      code = 'GNFS-0012';
-      agency = 'fire';
-      name = 'Fire Operator';
-    } else if (email.startsWith('ambulance')) {
-      role = 'ambulance';
-      code = 'AMB-0003';
-      agency = 'ambulance';
-      name = 'EMS Operator';
-    } else if (email.startsWith('admin')) {
-      role = 'admin';
-      code = 'ADMIN-001';
-      name = 'System Admin';
-    } else if (email.startsWith('dispatcher')) {
-      role = 'dispatcher';
-      code = 'DISP-0001';
-      name = 'Central Dispatcher';
-    }
+    if (email.startsWith('police')) { role = 'police'; code = 'POL-0021'; agency = 'police'; }
+    else if (email.startsWith('fire')) { role = 'fire'; code = 'GNFS-0012'; agency = 'fire'; }
+    else if (email.startsWith('ambulance')) { role = 'ambulance'; code = 'AMB-0003'; agency = 'ambulance'; }
+    else if (email.startsWith('admin')) { role = 'admin'; code = 'ADMIN-001'; }
+    else if (email.startsWith('dispatcher')) { role = 'dispatcher'; code = 'DISP-0001'; }
+
+    const tentativeUser = { id: `mock-id-${role}`, email, user_metadata: {} };
+    const registryProfile = mockProfiles[`mock-id-${role}`] || mockProfilesByEmail[email.toLowerCase()];
+    const name = (registryProfile && registryProfile.full_name) || resolveAuthorName(tentativeUser);
 
     req.isOfflineMock = true;
     req.authUser = {
       id: `mock-id-${role}`,
       email,
-      user_metadata: {
-        full_name: name,
-        role,
-        operator_code: code,
-        agency_type: agency
-      }
+      user_metadata: { full_name: name, role, operator_code: code, agency_type: agency }
     };
     return next();
   }

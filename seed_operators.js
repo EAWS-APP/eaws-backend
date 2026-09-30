@@ -3,6 +3,18 @@ const { supabaseAdmin } = require('./config/supabase');
 
 const OPERATORS = [
   {
+    email: 'ebenezer@eaws.gov.gh',
+    password: 'Staff@2026',
+    profile: {
+      full_name: 'Ebenezer Ayettey',
+      user_role: 'dispatcher',
+      operator_code: 'OP-7740',
+      agency_type: 'police',
+      is_approved: true,
+      is_active: true,
+    }
+  },
+  {
     email: 'dispatcher@eaws.gov.gh',
     password: 'Dispatch@2026',
     profile: {
@@ -85,6 +97,9 @@ async function seed() {
         email_confirm: true,
         user_metadata: {
           full_name: op.profile.full_name,
+          role: 'dispatcher',
+          badge_id: op.profile.operator_code,
+          agency_type: op.profile.agency_type || 'Central Command'
         }
       });
 
@@ -102,6 +117,9 @@ async function seed() {
         password: op.password,
         user_metadata: {
           full_name: op.profile.full_name,
+          role: 'dispatcher',
+          badge_id: op.profile.operator_code,
+          agency_type: op.profile.agency_type || 'Central Command'
         }
       });
 

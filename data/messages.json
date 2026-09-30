@@ -1,0 +1,43 @@
+{
+  "c-005": [
+    {
+      "id": "msg-1788345578927-edrv",
+      "sender": "operator",
+      "sender_id": "mock-id-dispatcher",
+      "text": "This message was deleted",
+      "type": "text",
+      "media_url": null,
+      "is_deleted": true,
+      "deleted_for_citizen": false,
+      "created_at": "2026-09-02T10:39:38.927Z",
+      "time": "10:39 AM",
+      "deleted_by": "operator"
+    },
+    {
+      "id": "msg-1788346222932-18kt",
+      "sender": "operator",
+      "sender_id": "mock-id-dispatcher",
+      "text": "Hello Abena, this is Central Dispatch. We received your report.",
+      "type": "text",
+      "media_url": null,
+      "is_deleted": false,
+      "deleted_for_citizen": false,
+      "created_at": "2026-09-02T10:50:22.932Z",
+      "time": "10:50 AM"
+    }
+  ],
+  "1a772ab7-22e1-4642-bb38-a242b48c8e4c": [
+    {
+      "id": "msg-1788346453436-gfaw",
+      "sender": "citizen",
+      "sender_id": "1a772ab7-22e1-4642-bb38-a242b48c8e4c",
+      "text": "Hello",
+      "type": "text",
+      "media_url": null,
+      "is_deleted": false,
+      "deleted_for_citizen": false,
+      "created_at": "2026-09-02T10:54:13.436Z",
+      "time": "10:54 AM"
+    }
+  ]
+}

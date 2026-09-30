@@ -1,0 +1,123 @@
+[
+  {
+    "id": "cp-79290",
+    "post_type": "community",
+    "content": "Hello Guys any updates",
+    "image_url": null,
+    "author_id": "c2f6928c-4cbe-4753-be13-809d3f2258b1",
+    "author_name": "Ayettey Ebenezer",
+    "author_initials": "AE",
+    "is_verified": true,
+    "created_at": "2026-09-01T12:15:15.769Z",
+    "replies_count": 4,
+    "likes_count": 0,
+    "replies": [
+      {
+        "id": "cpr-39258",
+        "post_id": "cp-79290",
+        "author_name": "Ayettey Ebenezer",
+        "author_initials": "AE",
+        "content": "Lol",
+        "created_at": "2026-09-01T12:16:31.180Z"
+      },
+      {
+        "id": "cpr-71300",
+        "post_id": "cp-79290",
+        "author_name": "Ayettey Ebenezer",
+        "author_initials": "AE",
+        "content": "Yes ooo",
+        "created_at": "2026-09-01T12:17:10.922Z"
+      },
+      {
+        "id": "cpr-74838",
+        "post_id": "cp-79290",
+        "author_name": "Ayettey Ebenezer",
+        "author_initials": "AE",
+        "content": "ok",
+        "created_at": "2026-09-01T12:17:29.729Z"
+      },
+      {
+        "id": "cpr-45024",
+        "post_id": "cp-79290",
+        "author_name": "Ghana Citizen",
+        "author_initials": "GC",
+        "content": "lol",
+        "created_at": "2026-09-01T14:41:22.847Z"
+      }
+    ]
+  },
+  {
+    "id": "cp-14980",
+    "post_type": "community",
+    "content": "Test sync post from mobile app!",
+    "image_url": null,
+    "author_id": "mock-id-citizen",
+    "author_name": "Ghana Citizen",
+    "author_initials": "GC",
+    "is_verified": true,
+    "created_at": "2026-09-01T12:14:28.633Z",
+    "replies_count": 0,
+    "likes_count": 0,
+    "replies": []
+  },
+  {
+    "id": "cp-001",
+    "post_type": "community",
+    "content": "Anyone else notice the traffic is really bad on the N1 highway this morning? Took me 45 minutes from Spintex to Accra Mall. Stay safe out there everyone 🙏",
+    "author_id": "c-001",
+    "author_name": "D. Harrison",
+    "author_initials": "DH",
+    "is_verified": true,
+    "created_at": "2026-09-01T12:02:30.531Z",
+    "replies_count": 3,
+    "likes_count": 7,
+    "replies": [
+      {
+        "id": "cpr-001",
+        "post_id": "cp-001",
+        "author_name": "Ama Serwaa Boateng",
+        "author_initials": "AS",
+        "content": "Yes! Same here. I heard there was an accident near Tetteh Quarshie. Take the Legon route.",
+        "created_at": "2026-09-01T12:05:30.531Z"
+      },
+      {
+        "id": "cpr-002",
+        "post_id": "cp-001",
+        "author_name": "Ghana Citizen",
+        "author_initials": "GC",
+        "content": "Thanks for the heads up! Switching routes now.",
+        "created_at": "2026-09-01T12:07:30.531Z"
+      },
+      {
+        "id": "cpr-82561",
+        "post_id": "cp-001",
+        "author_name": "Abena Osei-Bonsu",
+        "author_initials": "AO",
+        "content": "ok",
+        "created_at": "2026-09-01T16:02:26.515Z"
+      }
+    ]
+  },
+  {
+    "id": "cp-002",
+    "post_type": "community",
+    "content": "Heads up: The Electricity Company is doing maintenance work in East Legon areas 12 and 13 today from 9am to 4pm. Power will be out. Charge your devices now! ⚡",
+    "author_id": "c-003",
+    "author_name": "Kwame Asante",
+    "author_initials": "KA",
+    "is_verified": true,
+    "created_at": "2026-09-01T11:35:30.531Z",
+    "replies_count": 1,
+    "likes_count": 21,
+    "replies": [
+      {
+        "id": "cpr-003",
+        "post_id": "cp-002",
+        "author_name": "Nana Mensah",
+        "author_initials": "NM",
+        "content": "Thank you! Good to know. Will buy ice for the fridge 😅",
+        "created_at": "2026-09-01T11:50:30.531Z"
+      }
+    ]
+  }
+]
