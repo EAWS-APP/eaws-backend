@@ -1,5 +1,5 @@
 const express = require('express');
-const { supabaseAdmin } = require('../config/supabase');
+const { supabaseAdmin } = require('../config/insforge');
 
 
 const { requireAuth, requireRole, requireAnyRole, attachProfile } = require('../middleware/auth');

@@ -1,7 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { supabaseAdmin } = require('../config/supabase');
+const { supabaseAdmin } = require('../config/insforge');
 const { requireAnyRole } = require('../middleware/auth');
 
 const router = express.Router();
