@@ -4,6 +4,7 @@ const { supabaseAdmin } = require('../config/insforge');
 
 const { requireAuth, requireRole, requireAnyRole, attachProfile } = require('../middleware/auth');
 const { broadcastChange } = require('../config/realtime');
+const { db } = require('../config/ifg');
 const { mockIncidents, mockProfiles, resolveAuthorName, saveIncidents } = require('./mockDb');
 
 const router = express.Router();

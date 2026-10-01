@@ -140,6 +140,7 @@ router.post('/auth/signup', async (req, res, next) => {
     return res.status(201).json({
       success: true,
       user: userData.user,
+      session: userData.accessToken ? { access_token: userData.accessToken } : (userData.session || {}),
     });
   } catch (error) {
     return next(error);
@@ -168,7 +169,7 @@ router.post('/auth/signin', async (req, res, next) => {
     return res.json({
       success: true,
       user: data.user,
-      session: data.session,
+      session: data.accessToken ? { access_token: data.accessToken } : (data.session || {}),
     });
   } catch (error) {
     return next(error);

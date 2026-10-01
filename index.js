@@ -14,6 +14,7 @@ const communityRoutes = require('./routes/community');
 const agencyRoutes = require('./routes/agencies');
 const adminRoutes = require('./routes/admin');
 const messageRoutes = require('./routes/messages');
+const sosRoutes = require('./routes/sos');
 
 const app = express();
 // PORT must match NEXT_PUBLIC_API_BASE_URL in the dashboard (.env.local)
@@ -42,6 +43,7 @@ app.use('/api/community', communityRoutes);
 app.use('/api', agencyRoutes);
 app.use('/api', adminRoutes);
 app.use('/api', messageRoutes);
+app.use('/api', sosRoutes);
 
 
 // ─── /api/me — resolves user profile & role for dashboard routing ─────────────

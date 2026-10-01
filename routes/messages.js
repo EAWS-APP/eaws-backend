@@ -1,226 +1,162 @@
+'use strict';
 const express = require('express');
+const router  = express.Router();
+const { db } = require('../config/ifg');
 const { requireAuth } = require('../middleware/auth');
-const { mockMessages, saveMessages, resolveAuthorName } = require('./mockDb');
 
-const router = express.Router();
-
-// In-memory thread owners map (citizenId -> { operator_id, operator_name, operator_badge, agency, claimed_at })
-const mockThreadOwners = {
-  "c-001": { operator_id: "op-101", operator_name: "Dispatcher Kwesi A.", operator_badge: "GPS-042", agency: "Police", claimed_at: "2026-09-02T08:30:00Z" },
-  "c-002": { operator_id: "op-102", operator_name: "Dispatcher Sarah M.", operator_badge: "GNFS-119", agency: "Fire Service", claimed_at: "2026-09-02T09:15:00Z" },
-  "c-005": { operator_id: "op-103", operator_name: "Dispatcher Emmanuel K.", operator_badge: "NAS-991", agency: "Ambulance", claimed_at: "2026-09-02T10:00:00Z" },
-};
-
-// GET messages for a specific citizen
+// GET messages for a citizen thread
 router.get('/messages/:citizenId', requireAuth, async (req, res) => {
+  const { citizenId } = req.params;
+  const isDispatcher = ['dispatcher', 'admin', 'super_admin'].includes(
+    req.authUser.user_metadata?.role
+  );
+  if (!isDispatcher && req.authUser.id !== citizenId) {
+    return res.status(403).json({ success: false, error: 'Unauthorized' });
+  }
   try {
-    const { citizenId } = req.params;
-    const isDispatcher = req.authUser.user_metadata?.role === 'dispatcher' || req.authUser.user_metadata?.role === 'admin';
-
-    // Ensure citizen can only read their own messages
-    if (!isDispatcher && req.authUser.id !== citizenId) {
-      return res.status(403).json({ success: false, error: 'Unauthorized to read these messages' });
+    const rows = await db.select('messages', {
+      filter: { citizen_id: citizenId },
+      order: 'created_at.asc'
+    });
+    // Mark citizen messages as read by dispatcher
+    if (isDispatcher) {
+      await db.update('messages', { citizen_id: citizenId, is_from_dispatcher: false, is_read: false }, { is_read: true }).catch(() => {});
     }
-
-    let msgs = mockMessages[citizenId] || [];
-
-    // Filter out messages deleted for citizen if requester is a citizen
-    if (!isDispatcher) {
-      msgs = msgs.filter(m => !m.deleted_for_citizen);
-    }
-
-    const threadOwner = mockThreadOwners[citizenId] || null;
-
-    return res.json({ success: true, messages: msgs, thread_owner: threadOwner });
-  } catch (error) {
-    return res.status(500).json({ success: false, error: 'Failed to fetch messages' });
+    return res.json({ success: true, messages: rows, thread_owner: null });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
 // POST a new message
 router.post('/messages/:citizenId', requireAuth, async (req, res) => {
-  try {
-    const { citizenId } = req.params;
-    const { text, type, media_url } = req.body;
-    
-    if ((!text || !text.trim()) && !media_url) {
-      return res.status(400).json({ success: false, error: 'Message content or media is required' });
-    }
-
-    // Determine sender type (citizen or operator)
-    const isDispatcher = req.authUser.user_metadata?.role === 'dispatcher' || req.authUser.user_metadata?.role === 'admin';
-    const senderRole = isDispatcher ? 'operator' : 'citizen';
-
-    // Verify sender
-    if (senderRole === 'citizen' && req.authUser.id !== citizenId) {
-      return res.status(403).json({ success: false, error: 'Unauthorized to send message for this citizen' });
-    }
-
-    const msgType = type || (media_url ? (media_url.match(/\.(mp4|mov|webm)$/i) ? 'video' : 'image') : 'text');
-
-    const opMeta = isDispatcher ? {
-      operator_id: req.authUser.id || 'op-admin',
-      operator_name: req.authUser.user_metadata?.full_name || req.authUser.email?.split('@')[0] || 'Dispatch Operator',
-      operator_badge: req.authUser.user_metadata?.badge_id || 'DISPATCH-01',
-      agency: req.authUser.user_metadata?.agency_type || 'Central Command',
-    } : {};
-
-    const newMessage = {
-      id: 'msg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
-      sender: senderRole,
-      sender_id: req.authUser.id,
-      text: (text || '').trim(),
-      type: msgType,
-      media_url: media_url || null,
-      is_deleted: false,
-      deleted_for_citizen: false,
-      created_at: new Date().toISOString(),
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      ...opMeta
-    };
-
-    if (!mockMessages[citizenId]) {
-      mockMessages[citizenId] = [];
-    }
-    
-    mockMessages[citizenId].push(newMessage);
-    saveMessages();
-
-    return res.status(201).json({ success: true, message: newMessage });
-  } catch (error) {
-    return res.status(500).json({ success: false, error: 'Failed to send message' });
+  const { citizenId } = req.params;
+  const { text, type, media_url } = req.body;
+  if ((!text?.trim()) && !media_url) {
+    return res.status(400).json({ success: false, error: 'Message content or media required' });
   }
-});
-
-// CLAIM / REASSIGN THREAD OWNERSHIP
-router.post('/messages/:citizenId/claim', requireAuth, async (req, res) => {
-  try {
-    const { citizenId } = req.params;
-    const isDispatcher = req.authUser.user_metadata?.role === 'dispatcher' || req.authUser.user_metadata?.role === 'admin';
-
-    if (!isDispatcher) {
-      return res.status(403).json({ success: false, error: 'Only operators can claim threads' });
-    }
-
-    const operatorName = req.authUser.user_metadata?.full_name || req.authUser.email?.split('@')[0] || 'Dispatcher Emmanuel K.';
-    const operatorBadge = req.authUser.user_metadata?.badge_id || 'DISPATCH-01';
-    const agency = req.authUser.user_metadata?.agency_type || 'Central Command';
-
-    mockThreadOwners[citizenId] = {
-      operator_id: req.authUser.id,
-      operator_name: operatorName,
-      operator_badge: operatorBadge,
-      agency: agency,
-      claimed_at: new Date().toISOString()
-    };
-
-    return res.json({ success: true, thread_owner: mockThreadOwners[citizenId] });
-  } catch (error) {
-    return res.status(500).json({ success: false, error: 'Failed to claim thread' });
+  const isDispatcher = ['dispatcher', 'admin'].includes(req.authUser.user_metadata?.role);
+  if (!isDispatcher && req.authUser.id !== citizenId) {
+    return res.status(403).json({ success: false, error: 'Unauthorized' });
   }
-});
-
-// DELETE a specific message
-router.delete('/messages/:citizenId/:messageId', requireAuth, async (req, res) => {
   try {
-    const { citizenId, messageId } = req.params;
-    const isDispatcher = req.authUser.user_metadata?.role === 'dispatcher' || req.authUser.user_metadata?.role === 'admin';
-
-    const msgs = mockMessages[citizenId] || [];
-    const msgIndex = msgs.findIndex(m => m.id === messageId);
-
-    if (msgIndex === -1) {
-      return res.status(404).json({ success: false, error: 'Message not found' });
-    }
-
-    const targetMsg = msgs[msgIndex];
-
-    if (isDispatcher) {
-      // Operator deletion: Tombstone across all platforms
-      targetMsg.is_deleted = true;
-      targetMsg.text = 'This message was deleted';
-      targetMsg.media_url = null;
-      targetMsg.deleted_by = 'operator';
-      targetMsg.deleted_by_name = req.authUser.user_metadata?.full_name || 'Operator';
-    } else if (req.authUser.id === citizenId) {
-      if (targetMsg.sender === 'citizen') {
-        targetMsg.is_deleted = true;
-        targetMsg.text = 'This message was deleted';
-        targetMsg.media_url = null;
-        targetMsg.deleted_by = 'citizen';
+    const senderName = req.authUser.user_metadata?.full_name || req.authUser.email?.split('@')[0] || 'User';
+    const row = await db.insert('messages', {
+      citizen_id: citizenId,
+      sender_role: isDispatcher ? 'operator' : 'citizen',
+      sender_name: senderName,
+      content: (text || '').trim(),
+      is_from_dispatcher: isDispatcher,
+      is_read: false,
+      metadata: {
+        type: type || 'text',
+        media_url: media_url || null,
+        sender_id: req.authUser.id,
+        operator_badge: req.authUser.user_metadata?.badge_id || null,
+        agency: req.authUser.user_metadata?.agency_type || null,
       }
-      targetMsg.deleted_for_citizen = true;
-    } else {
-      return res.status(403).json({ success: false, error: 'Unauthorized to delete this message' });
-    }
-
-    saveMessages();
-
-    return res.json({ success: true, message: targetMsg });
-  } catch (error) {
-    return res.status(500).json({ success: false, error: 'Failed to delete message' });
+    });
+    return res.status(201).json({ success: true, message: row });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// GET summary of all active citizen message threads for dispatchers
+// DELETE a message (soft delete via metadata flag)
+router.delete('/messages/:citizenId/:messageId', requireAuth, async (req, res) => {
+  const { citizenId, messageId } = req.params;
+  const isDispatcher = ['dispatcher', 'admin'].includes(req.authUser.user_metadata?.role);
+  if (!isDispatcher && req.authUser.id !== citizenId) {
+    return res.status(403).json({ success: false, error: 'Unauthorized' });
+  }
+  try {
+    const rows = await db.select('messages', { filter: { id: messageId } });
+    if (!rows.length) return res.status(404).json({ success: false, error: 'Message not found' });
+    const msg = rows[0];
+    const updatedMeta = { ...msg.metadata, is_deleted: true, deleted_by: isDispatcher ? 'operator' : 'citizen' };
+    const updated = await db.update('messages', { id: messageId }, {
+      content: 'This message was deleted',
+      metadata: updatedMeta
+    });
+    return res.json({ success: true, message: Array.isArray(updated) ? updated[0] : updated });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET thread summary for dispatchers
 router.get('/messages/threads/summary', requireAuth, async (req, res) => {
+  const isDispatcher = ['dispatcher', 'admin', 'super_admin'].includes(req.authUser.user_metadata?.role);
+  if (!isDispatcher) return res.status(403).json({ success: false, error: 'Unauthorized' });
   try {
-    const isDispatcher = req.authUser.user_metadata?.role === 'dispatcher' || req.authUser.user_metadata?.role === 'admin';
-    if (!isDispatcher) {
-      return res.status(403).json({ success: false, error: 'Unauthorized to view dispatch threads' });
+    // Aggregate by citizen_id - get all messages then group
+    const all = await db.select('messages', { order: 'created_at.desc' });
+    const threadMap = {};
+    for (const m of all) {
+      if (!threadMap[m.citizen_id]) {
+        threadMap[m.citizen_id] = {
+          citizen_id: m.citizen_id,
+          total_messages: 0,
+          unread_count: 0,
+          last_message: null,
+          last_active: null,
+          thread_owner: null
+        };
+      }
+      const t = threadMap[m.citizen_id];
+      t.total_messages++;
+      if (!m.is_read && m.sender_role === 'citizen') t.unread_count++;
+      if (!t.last_message) {
+        t.last_message = m;
+        t.last_active = m.created_at;
+      }
     }
-
-    const threads = Object.keys(mockMessages).map(citizenId => {
-      const msgs = mockMessages[citizenId] || [];
-      const lastMsg = msgs[msgs.length - 1] || null;
-      const unreadCount = msgs.filter(m => m.sender === 'citizen' && !m.read).length;
-      return {
-        citizen_id: citizenId,
-        total_messages: msgs.length,
-        unread_count: unreadCount,
-        last_message: lastMsg,
-        last_active: lastMsg ? lastMsg.created_at : null,
-        thread_owner: mockThreadOwners[citizenId] || null
-      };
-    }).sort((a, b) => new Date(b.last_active || 0).getTime() - new Date(a.last_active || 0).getTime());
-
+    const threads = Object.values(threadMap).sort((a, b) =>
+      new Date(b.last_active || 0) - new Date(a.last_active || 0)
+    );
     return res.json({ success: true, threads });
-  } catch (error) {
-    return res.status(500).json({ success: false, error: 'Failed to fetch thread summaries' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// GET Admin Audit Trail Logs across all operator communications & actions
+// GET operator audit log — all dispatcher messages
 router.get('/messages/audit/logs', requireAuth, async (req, res) => {
+  const isDispatcher = ['dispatcher', 'admin', 'super_admin'].includes(req.authUser.user_metadata?.role);
+  if (!isDispatcher) return res.status(403).json({ success: false, error: 'Unauthorized' });
   try {
-    const isDispatcher = req.authUser.user_metadata?.role === 'dispatcher' || req.authUser.user_metadata?.role === 'admin';
-    if (!isDispatcher) {
-      return res.status(403).json({ success: false, error: 'Unauthorized to view audit logs' });
-    }
-
-    const allOperatorMsgs = [];
-    Object.keys(mockMessages).forEach(citizenId => {
-      const msgs = mockMessages[citizenId] || [];
-      msgs.forEach(m => {
-        if (m.sender === 'operator') {
-          allOperatorMsgs.push({
-            ...m,
-            citizen_id: citizenId
-          });
-        }
-      });
+    const logs = await db.select('messages', {
+      filter: { is_from_dispatcher: true },
+      order: 'created_at.desc'
     });
-
-    allOperatorMsgs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-    return res.json({
-      success: true,
-      logs: allOperatorMsgs,
-      thread_owners: mockThreadOwners
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, error: 'Failed to fetch audit logs' });
+    return res.json({ success: true, logs, thread_owners: {} });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// CLAIM a thread (dispatcher takes ownership - stored in profile metadata)
+router.post('/messages/:citizenId/claim', requireAuth, async (req, res) => {
+  const isDispatcher = ['dispatcher', 'admin'].includes(req.authUser.user_metadata?.role);
+  if (!isDispatcher) return res.status(403).json({ success: false, error: 'Only operators can claim threads' });
+  const owner = {
+    operator_id: req.authUser.id,
+    operator_name: req.authUser.user_metadata?.full_name || req.authUser.email?.split('@')[0] || 'Dispatcher',
+    operator_badge: req.authUser.user_metadata?.badge_id || 'DISPATCH-01',
+    agency: req.authUser.user_metadata?.agency_type || 'Central Command',
+    claimed_at: new Date().toISOString()
+  };
+  // Post a system message announcing the claim
+  await db.insert('messages', {
+    citizen_id: req.params.citizenId,
+    sender_role: 'system',
+    sender_name: 'System',
+    content: `${owner.operator_name} has joined this conversation.`,
+    is_from_dispatcher: true,
+    is_read: false,
+    metadata: { type: 'system', claim: owner }
+  }).catch(() => {});
+  return res.json({ success: true, thread_owner: owner });
 });
 
 module.exports = router;

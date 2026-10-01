@@ -1,235 +1,142 @@
+'use strict';
 const express = require('express');
-const { supabaseAdmin } = require('../config/insforge');
+const router  = express.Router();
+const { db } = require('../config/ifg');
+const { broadcastChange } = require('../config/realtime');
 const { requireAuth } = require('../middleware/auth');
-const { mockComments, mockReactions, mockCommunityPosts, saveCommunityPosts, saveComments, resolveAuthorName } = require('./mockDb');
 
-const router = express.Router();
+function authorName(user) {
+  return (
+    user.user_metadata?.full_name ||
+    user.user_metadata?.name ||
+    user.email?.split('@')[0] ||
+    'Anonymous'
+  );
+}
+function authorInitials(name) {
+  return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+}
 
+// ── Comments on incidents ──────────────────────────────────────────────────────
 
-// Add a comment to an incident
-router.post('/incidents/:id/comments', requireAuth, async (req, res, next) => {
+router.post('/incidents/:id/comments', requireAuth, async (req, res) => {
+  const { content } = req.body;
+  if (!content?.trim()) return res.status(400).json({ success: false, error: 'Comment content required' });
   try {
-    const { content } = req.body;
-    if (!content) {
-      return res.status(400).json({ success: false, error: 'Comment content is required' });
-    }
-
-    const payload = {
+    const name = authorName(req.authUser);
+    const row = await db.insert('incident_comments', {
       incident_id: req.params.id,
       user_id: req.authUser.id,
-      content,
-    };
-
-    const { data, error } = await supabaseAdmin
-      .from('incident_comments')
-      .insert(payload)
-      .select('*')
-      .single();
-
-    if (error) throw error;
-
-    // Note: We'll rely on database triggers to increment comments_count on incidents table
-
-    return res.status(201).json({ success: true, comment: data });
-  } catch (error) {
-    console.warn('⚠️ Supabase Incident Comment failed (offline), returning mock comment');
-    const newComment = {
-      id: 'comment-' + Math.floor(Math.random() * 10000),
-      incident_id: req.params.id,
-      user_id: req.authUser.id,
-      content: req.body.content,
-      created_at: new Date().toISOString(),
-      user_profile: {
-        full_name: req.authUser.user_metadata?.full_name || resolveAuthorName(req.authUser) || 'Citizen Reporter',
-        user_role: req.authUser.user_metadata?.role || 'citizen',
-        operator_code: req.authUser.user_metadata?.operator_code || null
-      }
-    };
-    if (!mockComments[req.params.id]) {
-      mockComments[req.params.id] = [];
-    }
-    mockComments[req.params.id].push(newComment);
-    
-    // Also increment comments_count on mock incident
-    const { mockIncidents } = require('./mockDb');
-    const inc = mockIncidents.find(i => i.id === req.params.id);
-    if (inc) {
-      inc.comments_count = (inc.comments_count || 0) + 1;
-    }
-
-    return res.status(201).json({
-      success: true,
-      comment: newComment
+      content: content.trim(),
+      user_name: name,
+      user_role: req.authUser.user_metadata?.role || 'citizen',
     });
+    // bump comments_count
+    await db.update('incidents', { id: req.params.id }, {
+      updated_at: new Date().toISOString()
+    }).catch(() => {});
+    broadcastChange('incidents', 'UPDATE', { id: req.params.id }).catch(() => {});
+    return res.status(201).json({ success: true, comment: row });
+  } catch (err) {
+    console.error('[community] comment insert error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// Get comments for an incident (with offline mock fallback)
-router.get('/incidents/:id/comments', requireAuth, async (req, res, next) => {
-  // Fast-path: mock/offline mode
-  if (req.isOfflineMock) {
-    return res.json({ success: true, comments: mockComments[req.params.id] || [] });
-  }
+router.get('/incidents/:id/comments', requireAuth, async (req, res) => {
   try {
-    const { data, error } = await supabaseAdmin
-      .from('incident_comments')
-      .select('*, user_profile:profiles(*)')
-      .eq('incident_id', req.params.id)
-      .order('created_at', { ascending: true });
-
-    if (error) throw error;
-    return res.json({ success: true, comments: data || [] });
-  } catch (error) {
-    console.warn('\u26a0\ufe0f Supabase Incident Comments GET failed (offline), returning mock comments');
-    return res.json({ success: true, comments: mockComments[req.params.id] || [] });
+    const rows = await db.select('incident_comments', {
+      filter: { incident_id: req.params.id },
+      order: 'created_at.asc'
+    });
+    return res.json({ success: true, comments: rows });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// React to an incident
-router.post('/incidents/:id/reactions', requireAuth, async (req, res, next) => {
-  try {
-    const reaction_type = req.body.reaction_type || req.body.type;
-    if (!reaction_type || !['like', 'alarmed', 'concerned'].includes(reaction_type)) {
-      return res.status(400).json({ success: false, error: 'Valid reaction_type is required' });
-    }
+// ── Reactions on incidents ─────────────────────────────────────────────────────
 
-    const payload = {
+router.post('/incidents/:id/reactions', requireAuth, async (req, res) => {
+  const reaction_type = req.body.reaction_type || req.body.type;
+  if (!reaction_type || !['like', 'alarmed', 'concerned'].includes(reaction_type)) {
+    return res.status(400).json({ success: false, error: 'Valid reaction_type required' });
+  }
+  try {
+    const row = await db.insert('incident_reactions', {
       incident_id: req.params.id,
       user_id: req.authUser.id,
       reaction_type,
-    };
-
-    const { data, error } = await supabaseAdmin
-      .from('incident_reactions')
-      .upsert(payload, { onConflict: 'incident_id,user_id,reaction_type' })
-      .select('*')
-      .single();
-
-    if (error) throw error;
-
-
-    // Note: We'll rely on database triggers to increment likes_count on incidents table
-
-    return res.status(201).json({ success: true, reaction: data });
-  } catch (error) {
-    console.warn('⚠️ Supabase Incident Reaction failed (offline), returning mock reaction');
-    const newReaction = {
-      id: 'reaction-' + Math.floor(Math.random() * 10000),
-      incident_id: req.params.id,
-      user_id: req.authUser.id,
-      reaction_type: req.body.reaction_type,
-      created_at: new Date().toISOString()
-    };
-    
-    const { mockIncidents, mockCommunityPosts, saveIncidents, saveCommunityPosts } = require('./mockDb');
-    const inc = mockIncidents.find(i => i.id === req.params.id);
-    if (inc) {
-      if (req.body.reaction_type === 'alarmed') inc.alarmed_count = (inc.alarmed_count || 0) + 1;
-      else if (req.body.reaction_type === 'concerned') inc.concerned_count = (inc.concerned_count || 0) + 1;
-      else inc.likes_count = (inc.likes_count || 0) + 1;
-      if (typeof saveIncidents === 'function') saveIncidents();
-    }
-    const cp = mockCommunityPosts.find(p => p.id === req.params.id);
-    if (cp) {
-      cp.likes_count = (cp.likes_count || 0) + 1;
-      if (typeof saveCommunityPosts === 'function') saveCommunityPosts();
-    }
-
-    return res.status(201).json({
-      success: true,
-      reaction: newReaction
     });
+    // bump likes_count
+    await db.update('incidents', { id: req.params.id }, {
+      updated_at: new Date().toISOString()
+    }).catch(() => {});
+    broadcastChange('incidents', 'UPDATE', { id: req.params.id }).catch(() => {});
+    return res.status(201).json({ success: true, reaction: row });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// ─── Community Posts (free-form messages, not formal incidents) ───────────────
+// ── Community Posts ────────────────────────────────────────────────────────────
 
-// GET all community posts, newest-first
 router.get('/posts', requireAuth, async (req, res) => {
   try {
-    if (req.isOfflineMock) throw new Error('offline');
-    const { data, error } = await supabaseAdmin
-      .from('community_posts')
-      .select('*, replies:community_post_replies(*)')
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    return res.json({ success: true, posts: data || [] });
-  } catch {
-    return res.json({
-      success: true,
-      posts: [...mockCommunityPosts].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-    });
+    const posts = await db.select('community_posts', { order: 'created_at.desc' });
+    // Attach replies
+    const replies = await db.select('community_post_replies', {});
+    const replyMap = {};
+    for (const r of replies) {
+      (replyMap[r.post_id] = replyMap[r.post_id] || []).push(r);
+    }
+    const enriched = posts.map(p => ({ ...p, replies: replyMap[p.id] || [] }));
+    return res.json({ success: true, posts: enriched });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// POST — create a new free-form community message
 router.post('/posts', requireAuth, async (req, res) => {
   const { content, image_url } = req.body;
-  if (!content || !content.trim()) {
-    return res.status(400).json({ success: false, error: 'Post content is required.' });
-  }
+  if (!content?.trim()) return res.status(400).json({ success: false, error: 'Post content required' });
   try {
-    if (req.isOfflineMock) throw new Error('offline');
-    const { data, error } = await supabaseAdmin
-      .from('community_posts')
-      .insert({ content: content.trim(), image_url: image_url || null, author_id: req.authUser.id })
-      .select('*').single();
-    if (error) throw error;
-    return res.status(201).json({ success: true, post: data });
-  } catch {
-    const name = resolveAuthorName(req.authUser);
-    const newPost = {
-      id: 'cp-' + Math.floor(Math.random() * 90000 + 10000),
+    const name = authorName(req.authUser);
+    const row = await db.insert('community_posts', {
+      author_id: req.authUser.id,
+      author_name: name,
+      author_initials: authorInitials(name),
       post_type: 'community',
       content: content.trim(),
       image_url: image_url || null,
-      author_id: req.authUser.id,
-      author_name: name,
-      author_initials: name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2),
       is_verified: true,
-      created_at: new Date().toISOString(),
-      replies_count: 0,
-      likes_count: 0,
-      replies: [],
-    };
-    mockCommunityPosts.unshift(newPost);
-    if (typeof saveCommunityPosts === 'function') saveCommunityPosts();
-    return res.status(201).json({ success: true, post: newPost });
+    });
+    broadcastChange('community_posts', 'INSERT', row).catch(() => {});
+    return res.status(201).json({ success: true, post: { ...row, replies: [] } });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// POST — reply to a community post
 router.post('/posts/:id/replies', requireAuth, async (req, res) => {
   const { content } = req.body;
-  if (!content || !content.trim()) {
-    return res.status(400).json({ success: false, error: 'Reply content is required.' });
-  }
+  if (!content?.trim()) return res.status(400).json({ success: false, error: 'Reply content required' });
   try {
-    if (req.isOfflineMock) throw new Error('offline');
-    const { data, error } = await supabaseAdmin
-      .from('community_post_replies')
-      .insert({ post_id: req.params.id, author_id: req.authUser.id, content: content.trim() })
-      .select('*').single();
-    if (error) throw error;
-    return res.status(201).json({ success: true, reply: data });
-  } catch {
-    const name = resolveAuthorName(req.authUser);
-    const reply = {
-      id: 'cpr-' + Math.floor(Math.random() * 90000 + 10000),
+    const name = authorName(req.authUser);
+    const row = await db.insert('community_post_replies', {
       post_id: req.params.id,
+      author_id: req.authUser.id,
       author_name: name,
-      author_initials: name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2),
+      author_initials: authorInitials(name),
       content: content.trim(),
-      created_at: new Date().toISOString(),
-    };
-    const post = mockCommunityPosts.find(p => p.id === req.params.id);
-    if (post) {
-      post.replies = post.replies || [];
-      post.replies.push(reply);
-      post.replies_count = post.replies.length;
-      if (typeof saveCommunityPosts === 'function') saveCommunityPosts();
-    }
-    return res.status(201).json({ success: true, reply });
+    });
+    // bump replies_count
+    await db.update('community_posts', { id: req.params.id }, {
+      updated_at: new Date().toISOString()
+    }).catch(() => {});
+    return res.status(201).json({ success: true, reply: row });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
