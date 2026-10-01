@@ -3,6 +3,7 @@ const { supabaseAdmin } = require('../config/insforge');
 
 
 const { requireAuth, requireRole, requireAnyRole, attachProfile } = require('../middleware/auth');
+const { broadcastChange } = require('../config/realtime');
 const { mockIncidents, mockProfiles, resolveAuthorName, saveIncidents } = require('./mockDb');
 
 const router = express.Router();
@@ -84,6 +85,7 @@ router.post('/incidents/sos', requireAuth, async (req, res, next) => {
 
     if (error) throw error;
 
+    broadcastChange('incidents', 'INSERT', data).catch(() => {});
     return res.status(201).json({
       success: true,
       incident: data,
@@ -168,6 +170,7 @@ router.post('/incidents/:id/media', requireAuth, async (req, res, next) => {
 
     if (error) throw error;
 
+    broadcastChange('incidents', 'INSERT', data).catch(() => {});
     return res.status(201).json({
       success: true,
       media: data,
@@ -332,6 +335,7 @@ router.patch('/incidents/:id', requireAuth, async (req, res, next) => {
 
     if (error) throw error;
 
+    broadcastChange('incidents', 'UPDATE', data).catch(() => {});
     return res.json({ success: true, incident: data });
   } catch (error) {
     const idx = mockIncidents.findIndex(inc => inc.id === req.params.id);
@@ -343,6 +347,7 @@ router.patch('/incidents/:id', requireAuth, async (req, res, next) => {
       };
       updated = mockIncidents[idx];
     }
+    broadcastChange('incidents', 'UPDATE', updated).catch(() => {});
     return res.json({ success: true, incident: updated });
   }
 });
@@ -491,6 +496,7 @@ router.post('/incidents', requireAuth, attachProfile, async (req, res, next) => 
     };
     mockIncidents.unshift(newInc);
     if (typeof saveIncidents === 'function') saveIncidents();
+    broadcastChange('incidents', 'INSERT', data).catch(() => {});
     return res.status(201).json({
       success: true,
       incident: newInc
@@ -521,6 +527,7 @@ router.patch('/incidents/:id/triage', requireRole('dispatcher'), async (req, res
       metadata: { severity, status, notes },
     });
 
+    broadcastChange('incidents', 'UPDATE', data).catch(() => {});
     return res.json({ success: true, incident: data });
   } catch (error) {
     console.warn('⚠️ Supabase triage failed (offline), returning mock success');
@@ -583,6 +590,7 @@ router.post('/incidents/:id/dispatch', requireRole('dispatcher'), async (req, re
       metadata: { agency_type, unit_id, priority, assignment_id: data.id },
     });
 
+    broadcastChange('incidents', 'INSERT', data).catch(() => {});
     return res.status(201).json({
       success: true,
       response_id: data.id,
@@ -591,6 +599,7 @@ router.post('/incidents/:id/dispatch', requireRole('dispatcher'), async (req, re
     });
   } catch (error) {
     console.warn('⚠️ Supabase dispatch failed (offline), returning mock response');
+    broadcastChange('incidents', 'INSERT', data).catch(() => {});
     return res.status(201).json({
       success: true,
       response: {
@@ -693,6 +702,7 @@ router.post('/incidents/:id/escalate', requireAuth, async (req, res, next) => {
       metadata: { reason: req.body.reason || 'Tactical backup requested' },
     });
 
+    broadcastChange('incidents', 'UPDATE', data).catch(() => {});
     return res.json({ success: true, incident: data });
   } catch (error) {
     return next(error);
@@ -749,6 +759,7 @@ router.post('/incidents/sos/:id/cancel', requireAuth, async (req, res, next) => 
       .select('*')
       .single();
     if (error) throw error;
+    broadcastChange('incidents', 'UPDATE', data).catch(() => {});
     return res.json({ success: true, incident: data });
   } catch (error) {
     return next(error);

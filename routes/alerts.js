@@ -1,4 +1,5 @@
 const express = require('express');
+const { broadcastChange } = require('../config/realtime');
 const { supabaseAdmin } = require('../config/insforge');
 const { requireAuth } = require('../middleware/auth');
 
@@ -71,12 +72,14 @@ router.post('/alerts', requireAuth, async (req, res, next) => {
 
     if (error) throw error;
 
+    broadcastChange('alerts', 'INSERT', data).catch(() => {});
     return res.status(201).json({
       success: true,
       alert: data,
     });
   } catch (error) {
     console.warn('⚠️ Supabase Alert Creation offline, returning mock response');
+    broadcastChange('alerts', 'INSERT', data).catch(() => {});
     return res.status(201).json({
       success: true,
       alert: {
